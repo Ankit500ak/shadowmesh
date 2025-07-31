@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, XCircle, Loader2, ExternalLink } from "lucide-react"
 
-const CONTRACT_ADDRESS = "0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F"
+const CONTRACT_ADDRESS = "0xf08578883B75b9537560481D1Cd560C4063ec455"
 
 interface VerificationResult {
   name: string

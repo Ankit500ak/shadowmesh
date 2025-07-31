@@ -5,8 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { AlertTriangle, ArrowRight, CheckCircle } from "lucide-react"
 
 export function MigrationNotice() {
-  const oldContract = "0x1A90681f89579b41eEc65d3647BAE2CEd2b6b634"
-  const newContract = "0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F"
+  const oldContract = "0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F"
+  const newContract = "0xf08578883B75b9537560481D1Cd560C4063ec455"
 
   return (
     <Card className="bg-yellow-900/20 border-yellow-500/30 backdrop-blur-sm">

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ExternalLink, CheckCircle, ChevronDown, ChevronUp, Info } from "lucide-react"
 
-const CONTRACT_ADDRESS = "0x1A90681f89579b41eEc65d3647BAE2CEd2b6b634"
+const CONTRACT_ADDRESS = "0xf08578883B75b9537560481D1Cd560C4063ec455"
 
 export function ContractInfo() {
   const [isExpanded, setIsExpanded] = useState(false)

@@ -18,6 +18,7 @@ const CONTRACT_ABI = [
   "function rejectConnectionRequest(bytes32 _requestId) external",
   "function sendEphemeralMessage(bytes32 _sessionId, bytes32 _encryptedContent) external returns (bytes32)",
   "function endChatSession(bytes32 _sessionId) external",
+  "function goOnline() external",
   "function goOffline() external",
   "function getMyUserId() external view returns (uint256)",
   "function isUserRegistered() external view returns (bool)",
@@ -40,7 +41,7 @@ const CONTRACT_ABI = [
 ]
 
 // 🚀 UPDATED WITH NEW DEPLOYED CONTRACT ADDRESS
-const CONTRACT_ADDRESS = "0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F" // ✅ NEW CONTRACT ADDRESS
+const CONTRACT_ADDRESS = "0xf08578883B75b9537560481D1Cd560C4063ec455" // ✅ LATEST FIXED CONTRACT ADDRESS
 
 const isValidAddress = (address: string): boolean => {
   try {
@@ -131,6 +132,25 @@ export default function EphemeralShadowMesh() {
     }
   }, [contract, userInfo])
 
+  // ✅ SECURITY FIX: Clean up session data on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Clear all session data when user leaves the page
+      const keys = Object.keys(sessionStorage)
+      keys.forEach(key => {
+        if (key.startsWith('session_key_') || key.startsWith('ipfs_')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
   // Connect wallet
   const connectWallet = async () => {
     try {
@@ -138,14 +158,14 @@ export default function EphemeralShadowMesh() {
       setError("")
 
       if (!window.ethereum) {
-        throw new Error("MetaMask is not installed! Please install MetaMask to continue.")
+        throw new Error("MetaMask is not installed! Please install MetaMask from https://metamask.io/ to continue.")
       }
 
       if (!isValidAddress(CONTRACT_ADDRESS)) {
         throw new Error("⚠️ Contract not deployed yet! Please deploy the contract and update CONTRACT_ADDRESS.")
       }
 
-      const provider = new ethers.BrowserProvider(window.ethereum)
+      const provider = new ethers.BrowserProvider(window.ethereum as any)
       const accounts = await provider.send("eth_requestAccounts", [])
 
       if (!accounts || accounts.length === 0) {
@@ -169,6 +189,43 @@ export default function EphemeralShadowMesh() {
     }
   }
 
+  // Go online silently (no alerts) - for automatic connection
+  const goOnlineSilently = async (contractInstance?: ethers.Contract) => {
+    const targetContract = contractInstance || contract
+    if (!targetContract) return
+
+    try {
+      // console.log("Starting silent go online...")
+      // Call the dedicated goOnline function
+      console.log("Calling goOnline function...")
+      const tx = await targetContract.goOnline()
+      console.log("Transaction sent, waiting for confirmation...")
+      await tx.wait()
+      console.log("Transaction completed!")
+
+      // Get updated user info from blockchain
+      const [userIdBN, displayName, registeredAt, isOnline] = await targetContract.getMyUserInfo()
+      console.log("Updated user info:", { userIdBN, displayName, registeredAt, isOnline })
+      
+      // Update user status with blockchain data
+      const newUserInfo = {
+        userId: Number(userIdBN),
+        displayName,
+        registeredAt: Number(registeredAt),
+        isOnline: isOnline, // This should now be true
+      }
+      // console.log("Setting new user info:", newUserInfo)
+      setUserInfo(newUserInfo)
+
+      // Refresh all data to ensure UI is updated
+      await refreshData(targetContract)
+      // console.log("Silent go online completed successfully!")
+    } catch (err: any) {
+      // Silent error - don't show alerts for automatic connection
+      console.error("Silent go online error:", err)
+    }
+  }
+
   // Check if user is registered
   const checkUserRegistration = async (contractInstance: ethers.Contract) => {
     try {
@@ -188,6 +245,9 @@ export default function EphemeralShadowMesh() {
           isOnline,
         })
 
+        // Automatically go online when user connects
+        // console.log("User connected, going online automatically...")
+        // Don't call goOnlineSilently here - it needs userInfo which isn't set yet
         await refreshData(contractInstance)
       }
     } catch (err: any) {
@@ -279,7 +339,8 @@ export default function EphemeralShadowMesh() {
   const generateQRCode = () => {
     if (!userInfo) return
 
-    const qrData = `shadowmesh:${userInfo.userId}:${userInfo.displayName}`
+    // ✅ SECURITY FIX: Only share user ID, not display name for privacy
+    const qrData = `shadowmesh:${userInfo.userId}`
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}`
 
     return qrUrl
@@ -477,7 +538,7 @@ export default function EphemeralShadowMesh() {
       setLoading(true)
       setError("")
 
-      const sharedKey = ethers.keccak256(ethers.toUtf8Bytes(account + requestId + Date.now()))
+      const sharedKey = generateSecureKey()
       const keyHash = ethers.keccak256(ethers.toUtf8Bytes(sharedKey))
 
       const tx = await contract.acceptConnectionRequest(requestId, keyHash)
@@ -496,7 +557,8 @@ export default function EphemeralShadowMesh() {
         const parsed = contract.interface.parseLog(sessionEvent)
         const sessionId = parsed?.args[0]
         if (sessionId) {
-          localStorage.setItem(`session_key_${sessionId}`, sharedKey)
+          // ✅ SECURITY FIX: Use sessionStorage for ephemeral data
+          sessionStorage.setItem(`session_key_${sessionId}`, sharedKey)
         }
       }
 
@@ -529,17 +591,24 @@ export default function EphemeralShadowMesh() {
     try {
       const messageIds = await contract.getSessionMessages(session.id)
       const messages: EphemeralMessage[] = []
-      const encryptionKey = localStorage.getItem(`session_key_${session.id}`)
+              // ✅ SECURITY FIX: Use sessionStorage for ephemeral data
+        const encryptionKey = sessionStorage.getItem(`session_key_${session.id}`)
 
       for (const msgId of messageIds) {
         const [sessionId, encryptedContent, timestamp, expiresAt, isActive, senderId] = await contract.messages(msgId)
 
         if (isActive && Number(expiresAt) > Date.now() / 1000) {
-          const encryptedData = localStorage.getItem(`ipfs_${encryptedContent}`)
+          // ✅ SECURITY FIX: Use sessionStorage for ephemeral data
+          const encryptedData = sessionStorage.getItem(`ipfs_${encryptedContent}`)
           let decryptedContent = "🔒 Unable to decrypt"
 
           if (encryptedData && encryptionKey) {
-            decryptedContent = decryptMessage(encryptedData, encryptionKey)
+            try {
+              const decrypted = await decryptMessage(encryptedData, encryptionKey)
+              decryptedContent = decrypted
+            } catch (error) {
+              decryptedContent = "🔒 Decryption failed"
+            }
           }
 
           messages.push({
@@ -567,12 +636,13 @@ export default function EphemeralShadowMesh() {
       setSendingMessage(true)
       setError("")
 
-      const encryptionKey = localStorage.getItem(`session_key_${selectedSession.id}`)
+              // ✅ SECURITY FIX: Use sessionStorage for ephemeral data
+        const encryptionKey = sessionStorage.getItem(`session_key_${selectedSession.id}`)
       if (!encryptionKey) {
         throw new Error("Encryption key not found for this session")
       }
 
-      const encryptedContent = encryptMessage(messageInput, encryptionKey)
+      const encryptedContent = await encryptMessage(messageInput, encryptionKey)
       const ipfsHash = await storeToIPFS(encryptedContent)
 
       const tx = await contract.sendEphemeralMessage(selectedSession.id, ipfsHash)
@@ -595,7 +665,8 @@ export default function EphemeralShadowMesh() {
       const tx = await contract.endChatSession(sessionId)
       await tx.wait()
 
-      localStorage.removeItem(`session_key_${sessionId}`)
+      // ✅ SECURITY FIX: Clean up session data from sessionStorage
+      sessionStorage.removeItem(`session_key_${sessionId}`)
 
       setSelectedSession(null)
       setSessionMessages([])
@@ -612,41 +683,197 @@ export default function EphemeralShadowMesh() {
     if (!contract) return
 
     try {
+      setLoading(true)
+      setError("")
+
       const tx = await contract.goOffline()
       await tx.wait()
 
+      // Clear all session data
       activeSessions.forEach((session) => {
-        localStorage.removeItem(`session_key_${session.id}`)
+        // ✅ SECURITY FIX: Clean up session data from sessionStorage
+        sessionStorage.removeItem(`session_key_${session.id}`)
       })
 
+      // Clear all session state
       setActiveSessions([])
       setSelectedSession(null)
       setSessionMessages([])
 
+      // Get updated user info from blockchain
+      const [userIdBN, displayName, registeredAt, isOnline] = await contract.getMyUserInfo()
+      
+      // Update user status with blockchain data
+      setUserInfo({
+        userId: Number(userIdBN),
+        displayName,
+        registeredAt: Number(registeredAt),
+        isOnline: isOnline, // This should be false after goOffline
+      })
+
+      // Refresh all data
+      await refreshData(contract)
+
       alert("📴 Gone offline. All chat sessions ended!")
     } catch (err: any) {
       setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
-  // Utility functions
-  const encryptMessage = (message: string, key: string): string => {
-    return btoa(message + "|" + key.slice(-8))
-  }
+  // Go online function - triggers updateActivity modifier
+  const goOnline = async () => {
+    if (!contract) return
 
-  const decryptMessage = (encryptedMessage: string, key: string): string => {
     try {
-      const decrypted = atob(encryptedMessage)
-      const [message, keyCheck] = decrypted.split("|")
-      return keyCheck === key.slice(-8) ? message : "🔒 Decryption failed"
-    } catch {
-      return "🔒 Invalid encrypted message"
+      setLoading(true)
+      setError("")
+      // console.log("Starting manual go online...")
+
+      // Check if goOnline function exists
+      if (typeof contract.goOnline !== 'function') {
+        // console.log("❌ goOnline function not found in contract - using alternative method")
+        
+        // Alternative: Use sendConnectionRequest to trigger updateActivity modifier
+        // This will set the user as online through the modifier
+        const tempUserId = 999999 // Use a non-existent user ID
+        try {
+          const tx = await contract.sendConnectionRequest(tempUserId)
+          await tx.wait()
+          // console.log("✅ Used alternative method to go online")
+        } catch (error: any) {
+          // Expected error: "Target user does not exist" - but updateActivity modifier was triggered
+          if (error.message.includes("Target user does not exist")) {
+            // console.log("✅ Alternative method worked - user is now online")
+          } else {
+            throw error
+          }
+        }
+      } else {
+        // Use the dedicated goOnline function
+        // console.log("Calling goOnline function...")
+        const tx = await contract.goOnline()
+        // console.log("Transaction sent, waiting for confirmation...")
+        await tx.wait()
+        // console.log("Transaction completed!")
+      }
+
+      // Get updated user info from blockchain
+              const [userIdBN, displayName, registeredAt, isOnline] = await contract.getMyUserInfo()
+        // console.log("Updated user info:", { userIdBN, displayName, registeredAt, isOnline })
+        
+        // Update user status with blockchain data
+      const newUserInfo = {
+        userId: Number(userIdBN),
+        displayName,
+        registeredAt: Number(registeredAt),
+        isOnline: isOnline, // This should now be true
+      }
+      // console.log("Setting new user info:", newUserInfo)
+      setUserInfo(newUserInfo)
+
+      // Refresh all data
+      await refreshData(contract)
+      // console.log("Manual go online completed successfully!")
+
+      alert("🟢 Back online!")
+    } catch (err: any) {
+      console.error("Manual go online error:", err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
+
+  // Secure key generation
+  const generateSecureKey = (): string => {
+    const array = new Uint8Array(32);
+    window.crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  };
+
+  // Key derivation from session key
+  const deriveCryptoKey = async (sessionKey: string): Promise<CryptoKey> => {
+    const encoder = new TextEncoder();
+    const keyMaterial = await window.crypto.subtle.importKey(
+      'raw',
+      encoder.encode(sessionKey),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+    
+    return await window.crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: encoder.encode('shadowmesh-salt'),
+        iterations: 100000,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  };
+
+  // Strong AES-GCM encryption
+  const encryptMessage = async (message: string, sessionKey: string): Promise<string> => {
+    try {
+      const cryptoKey = await deriveCryptoKey(sessionKey);
+      const encoder = new TextEncoder();
+      const data = encoder.encode(message);
+      
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const encrypted = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        data
+      );
+      
+      // Combine IV + encrypted data
+      const combined = new Uint8Array(iv.length + encrypted.byteLength);
+      combined.set(iv);
+      combined.set(new Uint8Array(encrypted), iv.length);
+      
+      return btoa(String.fromCharCode(...combined));
+    } catch (error) {
+      throw new Error('Failed to encrypt message');
+    }
+  };
+
+  // Strong AES-GCM decryption
+  const decryptMessage = async (encryptedMessage: string, sessionKey: string): Promise<string> => {
+    try {
+      const cryptoKey = await deriveCryptoKey(sessionKey);
+      const decoder = new TextDecoder();
+      
+      // Decode base64
+      const combined = new Uint8Array(
+        atob(encryptedMessage).split('').map(char => char.charCodeAt(0))
+      );
+      
+      // Extract IV and encrypted data
+      const iv = combined.slice(0, 12);
+      const encrypted = combined.slice(12);
+      
+      const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        encrypted
+      );
+      
+      return decoder.decode(decrypted);
+    } catch (error) {
+      return '🔒 Decryption failed';
+    }
+  };
 
   const storeToIPFS = async (content: string): Promise<string> => {
     const hash = ethers.keccak256(ethers.toUtf8Bytes(content + Date.now()))
-    localStorage.setItem(`ipfs_${hash}`, content)
+    // ✅ SECURITY FIX: Use sessionStorage for ephemeral data
+    sessionStorage.setItem(`ipfs_${hash}`, content)
     return hash
   }
 
@@ -679,6 +906,7 @@ export default function EphemeralShadowMesh() {
           </h1>
           <p className="text-purple-200 text-lg">Anonymous • Ephemeral • Untraceable</p>
           <p className="text-purple-300 text-sm">Connect by unique ID - no personal information exposed</p>
+          <p className="text-green-400 text-xs">🔐 Messages encrypted with AES-GCM (military-grade)</p>
         </div>
 
         {/* Registration Dialog */}
@@ -790,8 +1018,8 @@ export default function EphemeralShadowMesh() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-gray-300">Status:</span>
-                      <Badge variant="secondary" className="bg-green-600/20 text-green-300">
-                        Online
+                      <Badge variant="secondary" className={userInfo.isOnline ? "bg-green-600/20 text-green-300" : "bg-red-600/20 text-red-300"}>
+                        {userInfo.isOnline ? "Online" : "Offline"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
@@ -804,7 +1032,7 @@ export default function EphemeralShadowMesh() {
                 </div>
                 <div className="flex gap-2">
                   <Button
-                    onClick={refreshData}
+                    onClick={() => refreshData()}
                     variant="outline"
                     className="border-purple-500/30 text-purple-300 bg-transparent"
                   >
@@ -818,9 +1046,18 @@ export default function EphemeralShadowMesh() {
                     <QrCode className="h-4 w-4 mr-1" />
                     Share ID
                   </Button>
-                  <Button onClick={goOffline} variant="destructive" className="bg-red-600/20 text-red-300">
-                    📴 Go Offline
-                  </Button>
+                  {(() => {
+                    // console.log("Button render - userInfo.isOnline:", userInfo?.isOnline)
+                    return userInfo?.isOnline ? (
+                      <Button onClick={() => goOffline()} variant="destructive" className="bg-red-600/20 text-red-300">
+                        📴 Go Offline
+                      </Button>
+                    ) : (
+                      <Button onClick={() => goOnline()} variant="outline" className="border-green-500/30 text-green-300 bg-transparent">
+                        🟢 Go Online
+                      </Button>
+                    )
+                  })()}
                 </div>
               </div>
             ) : (

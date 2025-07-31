@@ -2,11 +2,11 @@
 
 ## 🚀 **LIVE ON SEPOLIA TESTNET!**
 
-**Contract Address:** `0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F`
+**Contract Address:** `0xf08578883B75b9537560481D1Cd560C4063ec455`
 **Network:** Sepolia Testnet
 **Status:** ✅ Fully Operational (Updated Contract)
 
-[View on Etherscan](https://sepolia.etherscan.io/address/0xC70A42B3CAa6324E2D2ec64ae5D18d25E379169F)
+[View on Etherscan](https://sepolia.etherscan.io/address/0xf08578883B75b9537560481D1Cd560C4063ec455)
 
 ### 🔧 Latest Updates:
 - ✅ Fixed registration errors
